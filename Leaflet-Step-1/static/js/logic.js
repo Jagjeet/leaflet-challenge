@@ -62,6 +62,21 @@ function createMap(earthquakeLayer) {
     collapsed: false
   }).addTo(map);
 
+  // Create a legend to display information about our map.
+  let info = L.control({
+    position: "bottomright"
+  });
+
+  // When the layer control is added, insert a div with the class of "legend".
+  info.onAdd = function() {
+    var div = L.DomUtil.create("div", "legend");
+    return div;
+  };
+  // Add the info legend to the map.
+  info.addTo(map);
+
+  // Call the updateLegend function, which will update the legend!
+  updateLegend();
 }
 
 function createMarkers(response) {
@@ -73,14 +88,42 @@ function createMarkers(response) {
     // Using https://stackoverflow.com/questions/40761205/javascript-convert-timestamp-to-human-readable-date
     let dateString = new Date(e.properties.time).toDateString();
 
-    return L.marker([e.geometry.coordinates[1], e.geometry.coordinates[0]])
-      .bindPopup(`<div class="card>
+    // Calculate color mappings based on depth
+    let depth = e.geometry.coordinates[2];
+
+    // Starting color codes for HSL taken from here:
+    // https://www.december.com/html/spec/colorhsl.html
+
+    // Map the depth into a range from 30 to 100.
+    // Lightness gets too light for lower values
+    let lightness = 10;
+    if (depth < 0) {
+      lightness = linearMapping(0, 0, 1000, 30, 100);
+    }
+    else {
+      lightness = linearMapping(depth, 0, 1000, 30, 100);
+    }
+
+    // Since we only range from 30 to 100 map the values into buckets here
+    lightness = Math.floor(lightness/7) * 7;
+    // console.log(`lightness: ${lightness}`);
+
+    let color = hslToHex(120, 100, 100 - lightness);
+
+    return L.circle([e.geometry.coordinates[1], e.geometry.coordinates[0]],
+                    {
+                      fillOpacity: 1.00,
+                      color: 'black',
+                      fillColor: color,
+                      radius: markerSize(e.properties.mag)
+                    })
+      .bindPopup(`<div class="card">
                     <div class="card-header"><h5>${e.properties.title}</h5></div>
                     <div class="card-body">
                       <div>ID: ${e.id}</div>
                       <div>Magnitude: ${e.properties.mag}</div>
                       <div>Time: ${dateString}</div>
-                      <div>Depth: ${e.geometry.coordinates[2]}km</div>
+                      <div>Depth: ${depth}km</div>
                     </div>
                   </div>`);
   });
@@ -89,5 +132,71 @@ function createMarkers(response) {
   createMap(L.layerGroup(earthquakeMarkers));
 }
 
+// Define a markerSize() function that will give each earthquake a different radius based on its magnitude.
+function markerSize(magnitude) {
+  let multiplier = 50000
+  if (magnitude <= 0) {
+    return multiplier;
+  }
+  return (Math.sqrt(magnitude) * multiplier) + multiplier;
+}
+
+// Define a color range (Unused, but may come back to this)
+// https://www.d3-graph-gallery.com/graph/custom_color.html
+let myColor = d3.scaleSequential().domain([1,10])
+  .interpolator(d3.interpolateViridis);
+
+// Color range inspired by:
+// https://css-tricks.com/using-javascript-to-adjust-saturation-and-brightness-of-rgb-colors/
+// HSL to Hex conversion function taken from:
+// https://stackoverflow.com/questions/36721830/convert-hsl-to-rgb-and-hex
+function hslToHex(h, s, l) {
+  l /= 100;
+  const a = s * Math.min(l, 1 - l) / 100;
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, '0');   // convert to Hex and prefix "0" if needed
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+//https://stackoverflow.com/questions/345187/math-mapping-numbers
+function linearMapping(x, min, max, newMin, newMax) {
+  return (x-min)/(max-min) * (newMax-newMin) + newMin;
+}
+
+// Update the legend's innerHTML with the last updated time and station count.
+function updateLegend() {
+
+  let legendRange = [];
+  for (let i=0; i <= 1000; i+=100) {
+    legendRange.push(i);
+  }
+
+  let legendHTML = legendRange.map(function(val) {
+    let lightness = linearMapping(val, 0, 1000, 30, 100);
+    lightness = Math.floor(lightness/7) * 7;
+    let hexColor = hslToHex(120, 100, 100 - lightness);
+
+    let range = val + "km to <" + (val+100) + "km";
+    if (val === 1000) {
+      range = `${val}km`;
+    }
+    return  `<div>
+              <div style='display: inline-block; width: 1rem; height: 1rem; background-color: ${hexColor}'></div>
+              <div style='display: inline-block;'>${range}</div>
+            </div>`
+  });
+
+  document.querySelector(".legend").innerHTML = legendHTML.join("");
+
+}
+
+
 // Perform an API call to the Earthquake USGS API to get the earthquake information. Call createMarkers when it completes.
-d3.json("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson").then(createMarkers);
+// Significant earthquakes
+// d3.json("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson").then(createMarkers);
+//Full month's earthquakes
+d3.json("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson").then(createMarkers);
+
